@@ -46,7 +46,7 @@ at the top of the scoring section in `js/main.js`.
 
 ## Playing
 
-**Play it:** https://whererusteve.github.io/whistler-shred/
+**Play it:** https://whererusteve.github.io/Whistler-Shred/
 
 Or run it locally with any static web server from this folder:
 
