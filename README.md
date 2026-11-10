@@ -20,9 +20,9 @@ mask (neck gaiter or balaclava), an avalanche airbag pack, stance, board colours
 | Board | Feel |
 |---|---|
 | All-mountain | the baseline |
-| Park twin | quicker turns, +30% spin speed, +15% pop, 15% less edge grip |
-| Powder swallowtail | about 7% less drag (faster), steadier, slower turns and spins |
-| Carving board | 40% more edge grip, slow spins |
+| Park twin | quicker edge to edge, +30% spin speed, +15% pop, 15% less edge grip |
+| Powder swallowtail | about 7% less drag (faster), a little more grip, slower edge to edge and spins |
+| Carving board | 40% more edge grip (tighter turns at speed), slow spins |
 
 Choices are saved on your device.
 
@@ -36,7 +36,8 @@ CalTopo screenshots of OpenStreetMap data (`tools/traces/lifts.json`); station h
 published values within about 20 m (Roundhouse 1,845 m, Peak 2,178 m, Piccolo 2,008 m, Olympic 1,028 m).
 
 **Gnar points**: clean landings score for airtime (from 0.6 s: 1 s = 60, 2 s = 182, 3 s = 349)
-and spins (180 = 150, 360 = 400, 540 = 750, 720 = 1,200, 900 = 1,800, 1080 = 2,500). Land tricks
+and spins (180 = 150, 360 = 400, 540 = 750, 720 = 1,200, 900 = 1,800, 1080 = 2,500). Hold tuck in
+the air for at least 0.4 s to grab the board (an Indy) for another 120. Land tricks
 within 4 seconds of each other for a combo multiplier (×1.5, ×2 … up to ×4); a wipeout loses the
 trick and the combo. Your best score per run is saved on your device. The numbers are in `GNAR`
 at the top of the scoring section in `js/main.js`.
@@ -57,10 +58,10 @@ python3 -m http.server 8000
 
 | Keys | Touch | What it does |
 |---|---|---|
-| ← → or A D | ◀ ▶ | Carve; in the air, spin |
+| ← → or A D | ◀ ▶ | Tip the board onto an edge and carve; in the air, spin |
 | Space | Jump | Hold to charge a bigger pop, release to jump |
-| ↑ or W | Tuck | Less drag at speed; skate-push on flats |
-| ↓ or S | Brake | Skid to slow down |
+| ↑ or W | Tuck | Less drag at speed; skate-push on flats; in the air, grab the board |
+| ↓ or S | Brake | Hockey stop: swing the board across the hill and scrape off speed (← → picks the side) |
 | R | ↺ | Restart from the top |
 
 ## Where the mountain comes from
@@ -126,29 +127,43 @@ js/gfx.js           sun, shadows, sky, snow surface, spray and board track
 js/course.js        stars, jumps, trees, gates (LAYOUT numbers at the top)
 js/buildings.js     Creekside and Kadenwood buildings from real footprints
 js/trees.js         the forest near the rider, from the satellite forest map (trees 16-33 m tall, like the real coastal forest)
-js/outfit.js        clothes, boards (shapes and handling) and the rider model
+js/outfit.js        clothes, boards (shapes and handling) and the jointed rider figure
 js/lifts.js         lifts: towers, cables, chairs and cabins, riding
-js/rider.js         snowboard physics (PHYSICS numbers at the top) and the rider model
+js/rider.js         snowboard physics (PHYSICS numbers at the top) and how the rider's body moves
 js/audio.js         synthesized sounds (no audio files)
 tools/build_course.py   real elevation data → course files
 tools/topo_contours.py  topo-map contours → tools/traces/whistler-contours.png
 vendor/             three.js r170 (MIT licence)
 ```
 
-## How the physics works (short version)
+## How the riding works (short version)
+
+The numbers are in `PHYSICS` at the top of `js/rider.js`.
 
 - Gravity pulls you down the slope; the snow pushes back so you stay on the surface.
-- The board's edge resists sliding sideways. Steering turns the board, and the edge bends
-  your path to follow it (a carve). Part of the sideways speed you lose turns into forward
-  speed, so good turns keep you fast.
+- Steering tips the board onto an edge (about a fifth of a second from flat). An edged board
+  follows its sidecut: the further it is tipped, the tighter the arc.
+- An edge only holds so much. A clean carve grips up to about 1.3 times your weight, so the
+  faster you go the wider the tightest turn gets: about 5 m across at 30 km/h, 30 m at
+  70 km/h. To turn tighter than that you have to slow down first, as on a real hill.
+- Hold a hard turn too long and the edge lets go. A sliding board has less than half the grip,
+  so you wash out wide and lose speed until it bites again. Short, linked turns stay clean.
+- Brake is a hockey stop: the board swings across your direction of travel and scrapes speed off.
+  Let go and the nose swings back downhill.
+- Toeside holds slightly better than heelside. The slope's own sideways pull counts too: turning
+  up the hill is easier than turning down it.
+- In the air a spin takes a moment to wind up and a moment to stop, and the board lands pointing
+  wherever you left it. Land off-line and you skid; more than about 63° sideways, or harder than
+  about a 7 m drop to flat, is a wipeout. Land backwards and you ride away switch.
 - Friction and air drag slow you down; drag grows with speed squared, which sets top speed.
-- You only leave the snow when the ground drops away faster than gravity can pull you down
-  (jump lips, rollovers), or when you ollie. Landing more than ~63° sideways, or very hard,
-  is a wipeout.
+
+The rider is a jointed figure (`buildRiderModel` in `js/outfit.js`, moved by `updateModel` in
+`js/rider.js`): knees and hips drop over the working edge, shoulders and head turn to look down
+the hill, arms balance, legs soak up landings.
 
 ## Ideas for later
 
-- More tricks for gnar points: grabs, flips, buttering
+- More tricks for gnar points: more grabs, flips, buttering
 - Lodges (Roundhouse, Rendezvous) and the Village buildings
 - Run names on the HUD from traced run lines
 - Village buildings (only Creekside and Kadenwood are traced so far)
