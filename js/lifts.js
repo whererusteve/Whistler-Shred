@@ -112,7 +112,18 @@ export function buildLifts(terrain, scene) {
   // Moving carriers: a chair (bench + bar) or a gondola cabin.
   const chairGeo = new THREE.BoxGeometry(2.2, 0.25, 0.7);
   chairGeo.translate(0, -2.6, 0);
-  const cabinGeo = new THREE.BoxGeometry(2.0, 2.2, 2.0);
+  // Gondola cabin: coloured shell with a dark band of windows around the middle.
+  const cabinGeo = new THREE.BoxGeometry(2.0, 2.2, 2.0, 1, 4, 1).toNonIndexed();
+  {
+    const p = cabinGeo.attributes.position, c = [];
+    for (let i = 0; i < p.count; i += 3) {
+      const ys = [p.getY(i), p.getY(i + 1), p.getY(i + 2)];
+      const y = (Math.min(...ys) + Math.max(...ys)) / 2;   // middle of the panel this triangle is in
+      const glass = y > 0 && y < 0.6;
+      for (let k = 0; k < 3; k++) c.push(...(glass ? [0.03, 0.05, 0.08] : y >= 0.6 ? [0.75, 0.77, 0.8] : [1, 1, 1]));
+    }
+    cabinGeo.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
+  }
   cabinGeo.translate(0, -2.8, 0);
   const hangerGeo = new THREE.BoxGeometry(0.08, 2.5, 0.08);
   hangerGeo.translate(0, -1.25, 0);
@@ -122,7 +133,7 @@ export function buildLifts(terrain, scene) {
     for (let i = 0; i < n; i++) for (const side of [-1, 1]) carriers.push({ L, s0: i * CARRIER_EVERY, side });
   }
   const chairMat = new THREE.MeshLambertMaterial({ color: 0x263238 });
-  const cabinMat = new THREE.MeshLambertMaterial({ color: 0xc62828 });
+  const cabinMat = new THREE.MeshLambertMaterial({ color: 0xc62828, vertexColors: true });
   const nChairs = carriers.filter(c => c.L.type !== 'gondola').length;
   const nCabins = carriers.length - nChairs;
   const chairMesh = new THREE.InstancedMesh(chairGeo, chairMat, Math.max(1, nChairs));

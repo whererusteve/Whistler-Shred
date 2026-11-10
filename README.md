@@ -92,11 +92,28 @@ To rebuild: `python3 tools/build_course.py` (needs numpy and Pillow; the forest 
 needs `rasterio`). Add a course to `COURSES` with a start and finish (the line is computed),
 a `trace` file of real lat/lon points, or `"mode": "free"` with drop-in spots.
 
+## How it looks
+
+All of this lives in `js/gfx.js`:
+
+- **Sun and shadows**: the sun sits in the south-east, like a winter mid-morning (`SUN`). When the
+  mountain loads, the game works out for every 6 m patch of ground whether a ridge or the forest
+  blocks the sun there, so bowls, gullies and tree-lined runs get real shadows at no cost while
+  you ride. Close to the rider (95 m, or 60 m on phones) a live shadow map adds crisp shadows
+  for the rider, trees, lift towers and buildings.
+- **Snow**: fine grain and wind drifts up close, a soft sheen and sparkles towards the sun, blue
+  shadows, bare rock on steep faces. Your board leaves a track.
+- **Distance**: you can see across the whole map (14 km; 6 km on phones) through thin blue haze,
+  under a sky with a sun, high cloud and far ranges.
+- **Trees**: tiered conifers with snow on the boughs, each a slightly different green.
+
+Phones get a lighter version automatically. Add `?gfx=low` or `?gfx=high` to the address to choose.
+
 ## Performance
 
-Only the trees within 450 m of you are 3D (rebuilt as you move); further away the forest is
-painted on the ground. Only stars within 450 m are drawn, and terrain beyond 450 m is drawn
-at half detail.
+Only the trees within about 390 m of you are 3D (rebuilt as you move); further away the forest is
+painted on the ground. Only stars within 450 m are drawn. Terrain is drawn at full detail up
+to 450 m, then half, quarter and eighth detail further out.
 
 ## Files
 
@@ -105,6 +122,7 @@ index.html          page, HUD, touch buttons
 css/game.css        look of the HUD and menus
 js/main.js          scene, camera, controls, game loop
 js/terrain.js       height lookups and the terrain mesh
+js/gfx.js           sun, shadows, sky, snow surface, spray and board track
 js/course.js        stars, jumps, trees, gates (LAYOUT numbers at the top)
 js/buildings.js     Creekside and Kadenwood buildings from real footprints
 js/trees.js         the forest near the rider, from the satellite forest map (trees 16-33 m tall, like the real coastal forest)

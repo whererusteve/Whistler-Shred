@@ -132,17 +132,20 @@ export class Terrain {
   }
 
   // Build the visible mountain in square chunks so the camera only draws the
-  // parts in view. Each chunk has a full-detail and a half-detail version; the
-  // half-detail one is drawn when the chunk is far away (Three.js LOD).
-  buildMesh(colorFn, material, chunk = 64, farDistance = 450) {
+  // parts in view. Each chunk comes in four levels of detail: full, then half,
+  // quarter and eighth for chunks further and further away (Three.js LOD).
+  buildMesh(material, chunk = 64, distances = [0, 450, 1100, 2600]) {
     const group = new THREE.Group();
     const { W, H } = this;
     for (let j0 = 0; j0 < H - 1; j0 += chunk) {
       for (let i0 = 0; i0 < W - 1; i0 += chunk) {
         const i1 = Math.min(i0 + chunk, W - 1), j1 = Math.min(j0 + chunk, H - 1);
         const lod = new THREE.LOD();
-        lod.addLevel(new THREE.Mesh(this.chunkGeometry(i0, j0, i1, j1, 1, colorFn), material), 0);
-        lod.addLevel(new THREE.Mesh(this.chunkGeometry(i0, j0, i1, j1, 2, colorFn), material), farDistance);
+        distances.forEach((d, level) => {
+          const mesh = new THREE.Mesh(this.chunkGeometry(i0, j0, i1, j1, 1 << level), material);
+          mesh.receiveShadow = true;
+          lod.addLevel(mesh, d);
+        });
         // LOD measures distance from the object's position: put it at the chunk's centre.
         const c = lod.levels[0].object.geometry.boundingSphere.center.clone();
         lod.position.copy(c);
@@ -153,10 +156,9 @@ export class Terrain {
     return group;
   }
 
-  chunkGeometry(i0, j0, i1, j1, step, colorFn) {
+  chunkGeometry(i0, j0, i1, j1, step) {
     const { cell } = this;
     const n = new THREE.Vector3();
-    const col = new THREE.Color();
     // Columns and rows to use; always include the chunk's last edge so chunks meet.
     const cols = [], rows = [];
     for (let i = i0; i < i1; i += step) cols.push(i);
@@ -164,22 +166,13 @@ export class Terrain {
     for (let j = j0; j < j1; j += step) rows.push(j);
     rows.push(j1);
     const cw = cols.length, chh = rows.length;
-    const pos = new Float32Array(cw * chh * 3);
-    const nor = new Float32Array(cw * chh * 3);
-    const clr = new Float32Array(cw * chh * 3);
-    const uv = new Float32Array(cw * chh * 2);
-    let k = 0;
+    const pos = [], nor = [];
     for (const j of rows) {
       for (const i of cols) {
-        const x = i * cell, z = j * cell, y = this.at(i, j);
-        pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;
+        pos.push(i * cell, this.at(i, j), j * cell);
         n.set(this.at(i - 1, j) - this.at(i + 1, j), 2 * cell,
           this.at(i, j - 1) - this.at(i, j + 1)).normalize();
-        nor[k * 3] = n.x; nor[k * 3 + 1] = n.y; nor[k * 3 + 2] = n.z;
-        colorFn(x, y, z, n, col);
-        clr[k * 3] = col.r; clr[k * 3 + 1] = col.g; clr[k * 3 + 2] = col.b;
-        uv[k * 2] = x / this.sizeX; uv[k * 2 + 1] = z / this.sizeZ; // whole-map texture
-        k++;
+        nor.push(n.x, n.y, n.z);
       }
     }
     const idx = [];
@@ -189,11 +182,25 @@ export class Terrain {
         idx.push(a, c, b, b, c, d);
       }
     }
+    // Skirt: a strip hanging down from the chunk's edge. Neighbouring chunks at
+    // different detail don't line up exactly; the skirt hides the gaps.
+    const drop = 6 * step;
+    const edge = [];
+    for (let i = 0; i < cw; i++) edge.push(i);
+    for (let j = 1; j < chh; j++) edge.push(j * cw + cw - 1);
+    for (let i = cw - 2; i >= 0; i--) edge.push((chh - 1) * cw + i);
+    for (let j = chh - 2; j >= 0; j--) edge.push(j * cw);
+    const base = pos.length / 3;
+    edge.forEach((v, e) => {
+      pos.push(pos[v * 3], pos[v * 3 + 1] - drop, pos[v * 3 + 2]);
+      nor.push(nor[v * 3], nor[v * 3 + 1], nor[v * 3 + 2]);
+      if (!e) return;
+      const a = edge[e - 1], c = base + e - 1, d = base + e;
+      idx.push(a, v, c, v, d, c, c, v, a, c, d, v); // both faces, so it shows from either side
+    });
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-    g.setAttribute('color', new THREE.BufferAttribute(clr, 3));
-    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     g.setIndex(idx);
     g.computeBoundingSphere();
     return g;
