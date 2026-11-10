@@ -193,7 +193,7 @@ function lockerCamera(t) {
   const p = rider.p, f = rider.forward();
   const ang = Math.sin(t * 0.4) * 0.5;               // slow sway
   const side = new THREE.Vector3(-f.z, 0, f.x);      // the rider's toe side
-  const goofy = rider.outfit.stance === 'goofy' ? -1 : 1;
+  const goofy = (rider.outfit.stance === 'goofy' ? -1 : 1) * (rider.sw ? -1 : 1);
   const dir = side.multiplyScalar(goofy).applyAxisAngle(_yAxis, ang);
   camera.position.set(p.x + dir.x * 3.6, p.y + 1.6, p.z + dir.z * 3.6);
   camera.lookAt(p.x, p.y + 0.9, p.z);
@@ -476,6 +476,8 @@ const GNAR = {
   minAir: 0.6,            // seconds: shorter hops don't score
   airPoints: t => Math.round(60 * Math.pow(t, 1.6)),        // 1 s = 60, 2 s = 182, 3 s = 349
   spinPoints: { 180: 150, 360: 400, 540: 750, 720: 1200, 900: 1800, 1080: 2500 },
+  grabPoints: 120,        // holding a grab (tuck in the air) for at least grabMin seconds
+  grabMin: 0.4,
   comboWindow: 4,         // seconds
   maxCombo: 4,
 };
@@ -486,12 +488,13 @@ function spinScore(deg) {
 function scoreLanding(e, now) {
   const air = e.air >= GNAR.minAir ? GNAR.airPoints(e.air) : 0;
   const spin = spinScore(e.spin);
+  const grab = e.grab >= GNAR.grabMin && (air || spin) ? GNAR.grabPoints : 0;
   if (!air && !spin) return;
   game.combo = now - game.lastTrick < GNAR.comboWindow ? Math.min(GNAR.maxCombo, game.combo + 0.5) : 1;
   game.lastTrick = now;
-  const pts = Math.round((air + spin) * game.combo);
+  const pts = Math.round((air + spin + grab) * game.combo);
   game.gnar += pts;
-  const what = [e.spin >= 180 ? `${e.spin}` : '', e.air >= GNAR.minAir ? `${e.air.toFixed(1)} s air` : '']
+  const what = [e.spin >= 180 ? `${e.spin}` : '', grab ? 'Indy' : '', e.heavy ? 'heavy landing' : '', e.air >= GNAR.minAir ? `${e.air.toFixed(1)} s air` : '']
     .filter(Boolean).join(' · ');
   toastHtml(what, `+${pts.toLocaleString()} gnar${game.combo > 1 ? ` ×${game.combo}` : ''}`);
 }
@@ -548,7 +551,10 @@ function frame(now) {
     sound.update(rider.speed(), rider.carve, rider.contact);
   }
   spray.update(dt);
-  trail.add(rider.p, rider.v, rider.contact && rider.crashed <= 0 && game.state !== 'riding' && !terrain.onBump(rider.p.x, rider.p.z), rider.carve);
+  // Carving on edge leaves a narrow trench, riding flat a board-wide track, and
+  // a sideways skid scrapes a swath as wide as the board is long.
+  trail.add(rider.p, rider.v, rider.contact && rider.crashed <= 0 && game.state !== 'riding' && !terrain.onBump(rider.p.x, rider.p.z),
+    rider.skid > 0.15 ? 0.12 + 0.6 * rider.skid : 0.12 - 0.06 * Math.min(1, rider.carve));
   lights.follow(rider.p);
   sky.material.uniforms.time.value = t;
   course.trees.update(rider.p.x, rider.p.z);

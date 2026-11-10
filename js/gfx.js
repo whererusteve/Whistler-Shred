@@ -419,14 +419,14 @@ export class Trail {
     scene.add(this.mesh);
   }
   clear() { this.on.fill(0); this.last.set(1e9, 0, 0); this.paint(); }
-  // Call every frame: p = rider position, v = velocity, down = board is on the snow.
-  add(p, v, down, carve) {
+  // Call every frame: p = rider position, v = velocity, down = board is on the snow,
+  // half = half the width of the mark the board is leaving.
+  add(p, v, down, half) {
     const hs = Math.hypot(v.x, v.z);
     const far = this.last.distanceToSquared(p);
     if (!down || hs < 0.8) { if (this.on[this.n - 1]) this.push(p, 0, 1, 0, 0); return; }
     if (far < 0.3 * 0.3) return;
-    // Carving on edge leaves a narrow trench; riding flat leaves a board-wide track.
-    this.push(p, -v.z / hs, v.x / hs, 0.12 - 0.06 * Math.min(1, carve), far > 9 ? 0 : 1);
+    this.push(p, -v.z / hs, v.x / hs, half, far > 9 ? 0 : 1);
   }
   push(p, sx, sz, half, on) {
     const T = this.terrain, n = this.n;

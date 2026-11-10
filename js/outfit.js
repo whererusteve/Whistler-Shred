@@ -96,16 +96,36 @@ function flatPiece(shape, depth, y) {
   return g;
 }
 
+// Body measurements (metres) for a rider about 1.75 m tall.
+export const BODY = {
+  thigh: 0.44, shin: 0.44, upperArm: 0.29, foreArm: 0.27,
+  hipHalf: 0.10,            // hip joints either side of the pelvis
+  ankle: [0, 0.27, 0.25],   // ankle above the board, half the stance width from centre
+  shoulder: [0, 0.45, 0.2], // shoulder joints, measured from the hips
+  neck: 0.53,
+};
+
+// The figure is a jointed body: pelvis, spine (torso + head), and arms and legs
+// made of straight pieces that rider.js stretches between joints every frame.
+// It is built facing -x (the toe edge) with the left foot at +z.
 export function buildRiderModel(o) {
   const root = new THREE.Group();
   const lean = new THREE.Group();          // tilts into turns
   root.add(lean);
   const mat = c => new THREE.MeshLambertMaterial({ color: c });
   const C = (group, name) => COLORS[group][name] ?? Object.values(COLORS[group])[0];
+  // Goofy riders lead with the right foot: the same body, turned to face the other edge.
+  const fig = new THREE.Group();
+  fig.rotation.y = o.stance === 'goofy' ? Math.PI : 0;
+  lean.add(fig);
+  // Board, bindings and boots move together (they swing forward on a chairlift).
+  const feet = new THREE.Group();
+  fig.add(feet);
 
   // Board, with a two-tone top sheet
   const boardGroup = new THREE.Group();
-  lean.add(boardGroup);
+  boardGroup.rotation.y = fig.rotation.y;  // keep the nose pointing forward
+  feet.add(boardGroup);
   const b = BOARDS[o.board];
   const w = b.width / 2, L = b.length / 2;
   boardGroup.add(new THREE.Mesh(flatPiece(boardShape(b.shape, w, L), 0.035, 0.0),
@@ -114,118 +134,138 @@ export function buildRiderModel(o) {
   deco.moveTo(-w * 0.35, -L * 0.62); deco.lineTo(w * 0.35, -L * 0.62);
   deco.lineTo(w * 0.35, L * 0.62); deco.lineTo(-w * 0.35, L * 0.62); deco.closePath();
   boardGroup.add(new THREE.Mesh(flatPiece(deco, 0.004, 0.035), mat(C('accent', o.accent))));
-  // Bindings
-  for (const z of [-0.24, 0.24]) {
-    const bind = new THREE.Mesh(new THREE.BoxGeometry(b.width * 0.95, 0.05, 0.2), mat(0x1a1a1a));
-    bind.position.set(0, 0.06, z);
-    bind.rotation.y = z > 0 ? 0.25 : -0.15;
-    boardGroup.add(bind);
+
+  // Bindings and boots: toes at -x, angled out a little ("duck" stance).
+  const dark = mat(0x161616), bootMat = mat(0x24262b);
+  for (const sgn of [-1, 1]) {
+    const foot = new THREE.Group();
+    foot.position.set(0, 0.04, sgn * BODY.ankle[2]);
+    foot.rotation.y = sgn * -0.21;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.03, 0.14), dark);
+    base.position.y = 0.015;
+    const highback = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.2, 0.12), dark);
+    highback.position.set(0.125, 0.13, 0); highback.rotation.z = 0.12;
+    const sole = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.115), bootMat);
+    sole.position.set(-0.02, 0.08, 0);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.066, 0.17, 10), bootMat);
+    cuff.position.set(0.04, 0.2, 0); cuff.rotation.z = 0.12;
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.135), dark);
+    strap.position.set(-0.01, 0.14, 0); strap.rotation.z = 0.5;
+    const toe = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.135), dark);
+    toe.position.set(-0.12, 0.125, 0);
+    foot.add(base, highback, sole, cuff, strap, toe);
+    feet.add(foot);
   }
 
-  // Legs (scaled when crouching)
-  const legs = new THREE.Group();
-  const pants = mat(C('pants', o.pants));
-  for (const z of [-0.24, 0.24]) {
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.6, 8), pants);
-    leg.position.set(0, 0.38, z);
-    legs.add(leg);
-    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.12, 0.16), mat(0x111111));
-    boot.position.set(0, 0.13, z);
-    legs.add(boot);
-  }
-  lean.add(legs);
+  // A limb piece: a tapered tube one metre long, stretched between two joints.
+  const pants = mat(C('pants', o.pants)), jacket = mat(C('jacket', o.jacket)), glove = mat(0x1a1a1a);
+  const piece = (rTop, rBottom, material) => {
+    const g = new THREE.CylinderGeometry(rTop, rBottom, 1, 10);
+    const m = new THREE.Mesh(g, material);
+    fig.add(m);
+    return m;
+  };
+  const ball = (r, material) => { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), material); fig.add(m); return m; };
+  const legs = [-1, 1].map(sgn => ({
+    sgn, thigh: piece(0.108, 0.09, pants), shin: piece(0.086, 0.088, pants), knee: ball(0.092, pants),
+  }));
+  const arms = [-1, 1].map(sgn => ({
+    sgn, upper: piece(0.072, 0.062, jacket), fore: piece(0.055, 0.062, jacket),
+    elbow: ball(0.063, jacket), shoulder: ball(0.08, jacket), hand: ball(0.066, glove),
+  }));
+  const pelvis = new THREE.Mesh(new THREE.CapsuleGeometry(0.115, 0.12, 4, 10), pants);
+  pelvis.rotation.x = Math.PI / 2;   // lies across the hips
+  fig.add(pelvis);
 
-  // Upper body faces the toe edge, like a real rider. Regular = left foot forward.
-  const body = new THREE.Group();
-  const jacket = mat(C('jacket', o.jacket));
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.45, 4, 10), jacket);
-  torso.position.y = 0.3;
-  body.add(torso);
+  // Spine: everything above the hips, measured up from the hip joint.
+  const spine = new THREE.Group();
+  spine.rotation.order = 'YZX';      // twist, then bend forward, then sideways
+  fig.add(spine);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.3, 4, 12), jacket);
+  torso.position.y = 0.26; torso.scale.set(0.98, 1, 1.32);   // wider across the shoulders
+  spine.add(torso);
+  const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.16, 0.14, 12), jacket);
+  hem.position.y = 0.04; hem.scale.set(0.95, 1, 1.25);
+  spine.add(hem);
+
+  const head = new THREE.Group();    // turns to look where the rider is going
+  head.position.y = BODY.neck + 0.11;
+  spine.add(head);
   // A balaclava covers the whole head except the goggles, so it replaces the skin.
   const maskMat = mat(C('mask', o.maskColor));
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 10), o.mask === 'balaclava' ? maskMat : mat(0xf1c27d));
-  head.position.y = 0.8;
-  body.add(head);
+  const skin = o.mask === 'balaclava' ? maskMat : mat(0xe2b48c);
+  head.add(new THREE.Mesh(new THREE.SphereGeometry(0.112, 14, 10), skin));
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8), skin);
+  neck.position.y = -0.11;
+  head.add(neck);
   if (o.mask === 'gaiter') {
     // Neck gaiter pulled up over nose and chin
-    const gaiter = new THREE.Mesh(new THREE.CylinderGeometry(0.178, 0.16, 0.2, 14), maskMat);
-    gaiter.position.y = 0.66;
-    body.add(gaiter);
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.176, 14, 8, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.22), maskMat);
-    nose.position.y = 0.8;
-    body.add(nose);
+    const gaiter = new THREE.Mesh(new THREE.CylinderGeometry(0.118, 0.1, 0.15, 14), maskMat);
+    gaiter.position.y = -0.09;
+    head.add(gaiter);
+    head.add(new THREE.Mesh(new THREE.SphereGeometry(0.117, 14, 8, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.22), maskMat));
   }
   if (o.top === 'hoodie') {
     // Hood down on the back, two drawstrings and a front pocket
-    const hood = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), jacket);
-    hood.position.set(0.17, 0.58, 0);
+    const hood = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), jacket);
+    hood.position.set(0.13, 0.47, 0);
     hood.rotation.z = -1.2;
     hood.scale.set(0.8, 0.55, 1.2); // lies flat between the shoulders
-    body.add(hood);
-    for (const z of [-0.06, 0.06]) {
-      const str = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 4), mat(0xf5f5f5));
-      str.position.set(-0.2, 0.47, z);
-      body.add(str);
+    spine.add(hood);
+    for (const z of [-0.045, 0.045]) {
+      const str = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.17, 4), mat(0xf5f5f5));
+      str.position.set(-0.145, 0.38, z);
+      spine.add(str);
     }
-    const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.14, 0.26), jacket);
-    pocket.position.set(-0.2, 0.18, 0);
-    body.add(pocket);
+    const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.11, 0.22), jacket);
+    pocket.position.set(-0.14, 0.13, 0);
+    spine.add(pocket);
   } else {
     // Jacket collar and a front zip
-    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.1, 12), jacket);
-    collar.position.y = 0.6;
-    body.add(collar);
-    const zip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.5, 0.02), mat(0x111111));
-    zip.position.set(-0.205, 0.32, 0);
-    body.add(zip);
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.1, 0.08, 12), jacket);
+    collar.position.y = 0.5;
+    spine.add(collar);
+    const zip = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.42, 0.015), mat(0x111111));
+    zip.position.set(-0.142, 0.25, 0);
+    spine.add(zip);
   }
   const headColor = mat(C('head', o.head));
   if (o.headwear === 'beanie') {
-    const hat = new THREE.Mesh(new THREE.SphereGeometry(0.185, 14, 10, 0, Math.PI * 2, 0, Math.PI / 1.9), headColor);
-    hat.position.y = 0.83; hat.scale.y = 1.15;
-    body.add(hat);
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.06, 14), headColor);
-    cuff.position.y = 0.84;
-    body.add(cuff);
-    const pom = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), mat(0xffffff));
-    pom.position.y = 1.06;
-    body.add(pom);
+    const hat = new THREE.Mesh(new THREE.SphereGeometry(0.122, 14, 10, 0, Math.PI * 2, 0, Math.PI / 1.9), headColor);
+    hat.position.y = 0.02; hat.scale.y = 1.15;
+    head.add(hat);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.125, 0.045, 14), headColor);
+    cuff.position.y = 0.03;
+    head.add(cuff);
+    const pom = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), mat(0xffffff));
+    pom.position.y = 0.175;
+    head.add(pom);
   } else {
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.195, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), headColor);
-    helmet.position.y = 0.82;
-    body.add(helmet);
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.132, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.56), headColor);
+    helmet.position.y = 0.012;
+    head.add(helmet);
+    for (const z of [-0.118, 0.118]) {   // ear pads
+      const pad = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), headColor);
+      pad.position.set(0.01, -0.035, z); pad.scale.z = 0.5;
+      head.add(pad);
+    }
   }
-  const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.182, 0.182, 0.05, 14, 1, true), mat(0x111111));
-  strap.position.y = 0.8;
-  body.add(strap);
-  const goggles = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.27), new THREE.MeshLambertMaterial({
+  const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.119, 0.119, 0.035, 14, 1, true), mat(0x111111));
+  strap.position.y = 0.012;
+  head.add(strap);
+  const goggles = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.18), new THREE.MeshLambertMaterial({
     color: C('lens', o.lens), emissive: C('lens', o.lens), emissiveIntensity: 0.25 }));
-  goggles.position.set(-0.16, 0.81, 0);
-  body.add(goggles);
+  goggles.position.set(-0.098, 0.012, 0);
+  head.add(goggles);
   if (o.pack) {
     // Avalanche airbag pack, with the red trigger handle on the shoulder strap.
-    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.42, 0.3), mat(0xd84315));
-    pack.position.set(0.23, 0.36, 0);
-    body.add(pack);
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.05), mat(0xff1744));
-    handle.position.set(-0.17, 0.48, 0.12);
-    body.add(handle);
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.36, 0.27), mat(0xd84315));
+    pack.position.set(0.19, 0.28, 0);
+    spine.add(pack);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.07, 0.04), mat(0xff1744));
+    handle.position.set(-0.13, 0.38, 0.1);
+    spine.add(handle);
   }
-  const arms = new THREE.Group();
-  for (const z of [-0.3, 0.3]) {
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.42, 4, 8), jacket);
-    arm.position.set(0, 0.35, z);
-    arm.rotation.x = z > 0 ? -1.1 : 1.1;
-    arms.add(arm);
-    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), mat(0x1a1a1a));
-    glove.position.set(0, 0.22, Math.sign(z) * 0.56); // at the hand end of the arm
-    arms.add(glove);
-  }
-  arms.position.y = 0.05;
-  body.add(arms);
-  body.position.y = 0.95;
-  // Goofy riders lead with the right foot, so they face the other edge.
-  if (o.stance === 'goofy') body.rotation.y = Math.PI;
-  lean.add(body);
-  return { root, lean, body, legs, arms, board: boardGroup, up: new THREE.Vector3(0, 1, 0) };
+  return { root, lean, fig, feet, board: boardGroup, pelvis, spine, head, legs, arms,
+    halfWidth: w, up: new THREE.Vector3(0, 1, 0) };
 }
