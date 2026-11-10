@@ -43,10 +43,6 @@ export class Rider {
     this.events = [];       // 'land', 'crash', 'jump', 'trick' for sound & HUD
     this.scene = scene;
     this.setOutfit(DEFAULT_OUTFIT);
-    this.shadow = new THREE.Mesh(new THREE.CircleGeometry(0.9, 20),
-      new THREE.MeshBasicMaterial({ color: 0x0b1530, transparent: true, opacity: 0.32, depthWrite: false }));
-    this.shadow.renderOrder = 1;
-    scene.add(this.shadow);
   }
 
   // Change clothes and board. The board also changes how the rider handles.
@@ -55,6 +51,8 @@ export class Rider {
     this.outfit = outfit;
     this.board = BOARDS[outfit.board].stats;
     this.model = buildRiderModel(outfit);
+    // The rider casts a real shadow (see gfx.js); clear parts like goggles don't.
+    this.model.root.traverse(o => { if (o.isMesh) { o.castShadow = !o.material.transparent; o.receiveShadow = true; } });
     this.scene.add(this.model.root);
   }
 
@@ -277,13 +275,6 @@ export class Rider {
     }
     if (!sit) m.arms.rotation.z = this.contact ? -this.lean * 0.8 : Math.sin(time * 6) * 0.3;
 
-    const g = this.terrain.groundHeight(this.p.x, this.p.z);
-    const sn = this.terrain.normalAt(this.p.x, this.p.z);
-    this.shadow.position.set(this.p.x, g + 0.06, this.p.z);
-    this.shadow.quaternion.setFromUnitVectors(_z.set(0, 0, 1), sn);
-    const height = Math.max(0, this.p.y - g);
-    this.shadow.scale.setScalar(1 / (1 + height * 0.08));
-    this.shadow.material.opacity = 0.32 / (1 + height * 0.15);
   }
 }
 

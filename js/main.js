@@ -5,184 +5,37 @@ import { buildCourse } from './course.js';
 import { Rider } from './rider.js';
 import { Sound } from './audio.js';
 import { COLORS, BOARDS, loadOutfit, saveOutfit } from './outfit.js';
+import { QUALITY, HAZE, makeSky, makeLights, groundMaterial, shadows, Spray, Trail } from './gfx.js';
 
 // Pick a run with #peak-to-creek or ?course=peak-to-creek; free ride by default.
 const COURSE_ID = location.hash.slice(1) || new URLSearchParams(location.search).get('course') || 'freeride';
 const $ = id => document.getElementById(id);
 
 // ---------- Renderer, scene, camera ----------
+// The look of everything (sun, shadows, sky, snow) is set up in gfx.js.
 const renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
-renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, QUALITY.pixelRatio));
+// Film-like response to bright light: sunlit snow stays detailed instead of going flat white.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
-const SKY = new THREE.Color(0xc9def2);
-scene.background = SKY;
-scene.fog = new THREE.Fog(SKY, 250, 1400);
-// Nothing past the fog is drawn, which keeps phones fast.
-const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 1700);
-
-scene.add(new THREE.HemisphereLight(0xd6e6ff, 0x8c9fc4, 1.25));
-const sun = new THREE.DirectionalLight(0xfff1dc, 1.6);
-sun.position.set(0.7, 0.55, -0.45);
-scene.add(sun);
+scene.background = HAZE;
+// Thin haze: far slopes fade to blue-grey, as they do on a clear day.
+scene.fog = new THREE.FogExp2(HAZE, QUALITY.haze);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.3, QUALITY.viewDistance);
+const lights = makeLights(scene, renderer);
 
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (spray) spray.setSize(h * renderer.getPixelRatio());
 }
 window.addEventListener('resize', resize);
-resize();
 
-// Sky dome: deep blue overhead fading to pale at the horizon.
-function skyDome() {
-  const g = new THREE.SphereGeometry(1500, 24, 16);
-  const c = [], top = new THREE.Color(0x3b78c4), low = SKY;
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const t = Math.max(0, p.getY(i) / 1500);
-    const col = low.clone().lerp(top, Math.pow(t, 0.6));
-    c.push(col.r, col.g, col.b);
-  }
-  g.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
-  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
-  m.renderOrder = -1;
-  return m;
-}
-const sky = skyDome();
+const sky = makeSky();
 scene.add(sky);
-
-// Fine snow texture so you can feel the speed up close.
-function snowTexture() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const g = c.getContext('2d');
-  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 2600; i++) {
-    const v = 214 + Math.random() * 36;
-    g.fillStyle = `rgb(${v},${v + 3},${Math.min(255, v + 10)})`;
-    g.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 2, 1 + Math.random() * 2);
-  }
-  // Faint corduroy lines from the groomer
-  for (let y = 0; y < 256; y += 4) {
-    g.fillStyle = 'rgba(150,170,200,0.06)';
-    g.fillRect(0, y, 256, 1);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  return t;
-}
-
-// The ground's colour across the whole mountain: snow, with the real forest
-// (from the satellite forest map) painted in darker green-grey. Up close the 3D
-// trees stand on it; far away it is what makes the forest visible.
-function groundTexture(terrain) {
-  const c = document.createElement('canvas');
-  const w = terrain.fw || 2, h = terrain.fh || 2;
-  c.width = w; c.height = h;
-  const g = c.getContext('2d');
-  const img = g.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) {
-    const f = terrain.forest ? terrain.forest[i] / 255 : 0;
-    const k = Math.min(1, f * 1.1);
-    const n = (Math.random() - 0.5) * 10 * k;
-    img.data[i * 4] = 255 + (70 - 255) * k + n;
-    img.data[i * 4 + 1] = 255 + (98 - 255) * k + n;
-    img.data[i * 4 + 2] = 255 + (90 - 255) * k + n;
-    img.data[i * 4 + 3] = 255;
-  }
-  g.putImageData(img, 0, 0);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.flipY = false; // row 0 is the north edge, like the map
-  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  return t;
-}
-
-// Ground material: whole-map colour (above) times a fine repeating snow texture.
-function groundMaterial(terrain) {
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: groundTexture(terrain) });
-  const detail = snowTexture();
-  mat.onBeforeCompile = sh => {
-    sh.uniforms.detailMap = { value: detail };
-    sh.uniforms.detailRepeat = { value: new THREE.Vector2(terrain.sizeX / 7, terrain.sizeZ / 7) };
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D detailMap;\nuniform vec2 detailRepeat;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb *= texture2D(detailMap, vMapUv * detailRepeat).rgb;');
-  };
-  return mat;
-}
-
-function snowColor(x, y, z, n, out) {
-  const slope = Math.acos(Math.min(1, n.y)) * 180 / Math.PI;
-  const rock = THREE.MathUtils.smoothstep(slope, 36, 50);
-  const hash = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
-  const jitter = (hash - Math.floor(hash) - 0.5) * 0.04;
-  const sr = 0.86 + jitter, sg = 0.9 + jitter, sb = 0.97;
-  out.setRGB(
-    sr + (0.40 - sr) * rock,
-    sg + (0.40 - sg) * rock,
-    sb + (0.44 - sb) * rock,
-  );
-  return out;
-}
-
-// ---------- Snow spray ----------
-class Spray {
-  constructor(count = 400) {
-    this.n = count;
-    this.pos = new Float32Array(count * 3).fill(-1e5);
-    this.vel = new Float32Array(count * 3);
-    this.life = new Float32Array(count);
-    this.next = 0;
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    const dot = document.createElement('canvas');
-    dot.width = dot.height = 32;
-    const dg = dot.getContext('2d');
-    const grad = dg.createRadialGradient(16, 16, 0, 16, 16, 16);
-    grad.addColorStop(0, 'rgba(255,255,255,1)');
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    dg.fillStyle = grad; dg.fillRect(0, 0, 32, 32);
-    this.points = new THREE.Points(g, new THREE.PointsMaterial({
-      color: 0xffffff, size: 0.45, map: new THREE.CanvasTexture(dot),
-      transparent: true, opacity: 0.9, depthWrite: false,
-    }));
-    this.points.frustumCulled = false;
-    scene.add(this.points);
-    this.acc = 0;
-  }
-  emit(p, v, amount, dt) {
-    this.acc += amount * 260 * dt;
-    while (this.acc > 1) {
-      this.acc--;
-      const i = this.next = (this.next + 1) % this.n;
-      this.pos[i * 3] = p.x + (Math.random() - 0.5) * 0.8;
-      this.pos[i * 3 + 1] = p.y + 0.1;
-      this.pos[i * 3 + 2] = p.z + (Math.random() - 0.5) * 0.8;
-      this.vel[i * 3] = v.x * 0.35 + (Math.random() - 0.5) * 3;
-      this.vel[i * 3 + 1] = 1.5 + Math.random() * 2.5;
-      this.vel[i * 3 + 2] = v.z * 0.35 + (Math.random() - 0.5) * 3;
-      this.life[i] = 0.5 + Math.random() * 0.5;
-    }
-  }
-  update(dt) {
-    for (let i = 0; i < this.n; i++) {
-      if (this.life[i] <= 0) continue;
-      this.life[i] -= dt;
-      if (this.life[i] <= 0) { this.pos[i * 3 + 1] = -1e5; continue; }
-      this.vel[i * 3 + 1] -= 6 * dt;
-      this.pos[i * 3] += this.vel[i * 3] * dt;
-      this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
-      this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
-    }
-    this.points.geometry.attributes.position.needsUpdate = true;
-  }
-}
 
 // ---------- Controls ----------
 const keys = new Set();
@@ -224,7 +77,8 @@ function readInput() {
 const sound = new Sound();
 const game = { state: 'loading', time: 0, stars: 0, routeIndex: 0, toastTimer: 0, spawn: 0,
   gnar: 0, combo: 1, lastTrick: -99, resumeState: null };
-let terrain, course, rider, spray;
+let terrain, course, rider, spray, trail;
+resize();
 
 function fmtTime(t) {
   const m = Math.floor(t / 60), s = t - m * 60;
@@ -273,6 +127,7 @@ function restart() {
   game.gnar = 0; game.combo = 1; game.lastTrick = -99;
   rider.events.length = 0;
   havePrev = false;
+  trail.clear();
   $('finish').hidden = true;
   if (game.state === 'finished') game.state = 'playing';
   snapCamera();
@@ -693,6 +548,9 @@ function frame(now) {
     sound.update(rider.speed(), rider.carve, rider.contact);
   }
   spray.update(dt);
+  trail.add(rider.p, rider.v, rider.contact && rider.crashed <= 0 && game.state !== 'riding' && !terrain.onBump(rider.p.x, rider.p.z), rider.carve);
+  lights.follow(rider.p);
+  sky.material.uniforms.time.value = t;
   course.trees.update(rider.p.x, rider.p.z);
   course.lifts.update(t, rider.p);
   updateLiftPrompt();
@@ -779,10 +637,18 @@ async function init() {
   const pick = $('course-pick');
   pick.value = COURSE_ID;
   pick.addEventListener('change', () => { location.hash = pick.value; location.reload(); });
-  scene.add(terrain.buildMesh(snowColor, groundMaterial(terrain)));
+  scene.add(terrain.buildMesh(groundMaterial(terrain)));
+  const before = scene.children.length;
   course = buildCourse(terrain, scene);
+  // Buildings, lifts, jumps and gates cast and catch shadows. Trees set up their
+  // own; stars glow, so they're left alone.
+  for (const o of scene.children.slice(before)) {
+    if (o !== course.trees.mesh && o !== course.trees.casters && o !== course.starMesh) shadows(o);
+  }
   rider = new Rider(terrain, scene);
-  spray = new Spray();
+  spray = new Spray(scene);
+  trail = new Trail(scene, terrain);
+  resize();
   const spawnPick = $('spawn-pick');
   if (course.spawns.length && !course.route) {
     course.spawns.forEach((sp, i) => spawnPick.add(new Option(sp.name, i)));
